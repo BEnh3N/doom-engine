@@ -1,27 +1,29 @@
-use std::{
-    f32::consts::PI,
-    time::{Duration, Instant},
-};
+use std::f32::consts::PI;
 
-use pixels::{Pixels, SurfaceTexture};
-use winit::{
-    dpi::LogicalSize,
-    event::{Event, VirtualKeyCode},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
-use winit_input_helper::WinitInputHelper;
+use raylib::prelude::*;
 
 const WIDTH: i32 = 160;
 const HEIGHT: i32 = 120;
 const SCALE: i32 = 4;
+const SCREEN_WIDTH: i32 = WIDTH * SCALE;
+const SCREEN_HEIGHT: i32 = HEIGHT * SCALE;
+
+const COLORS: [Color; 9] = [
+    Color::new(255, 255, 0, 255),
+    Color::new(160, 160, 0, 255),
+    Color::new(0, 255, 0, 255),
+    Color::new(0, 160, 0, 255),
+    Color::new(0, 255, 255, 255),
+    Color::new(0, 160, 160, 255),
+    Color::new(160, 100, 0, 255),
+    Color::new(110, 50, 0, 255),
+    Color::new(0, 60, 130, 255),
+];
 
 struct Engine {
-    tick: i32,
-    time: Instant,
-    keys: Keys,
-    math: Math,
-    player: Player,
+    k: Keys,
+    m: Math,
+    p: Player,
 }
 
 struct Math {
@@ -37,6 +39,7 @@ struct Player {
     l: i32,
 }
 
+#[derive(Default)]
 struct Keys {
     w: bool,
     a: bool,
@@ -48,72 +51,59 @@ struct Keys {
 }
 
 fn main() {
-    let event_loop = EventLoop::new();
-    let mut input = WinitInputHelper::new();
-    let window = {
-        let size = LogicalSize::new(WIDTH * SCALE, HEIGHT * SCALE);
-        WindowBuilder::new()
-            .with_title("Doom Engine")
-            .with_inner_size(size)
-            .with_resizable(false)
-            .build(&event_loop)
-            .unwrap()
-    };
+    // Set up the window
+    let (mut rl, thread) = raylib::init()
+        .size(SCREEN_WIDTH, SCREEN_HEIGHT)
+        .title("Doom Engine")
+        .build();
 
-    let mut pixels = {
-        let window_size = window.inner_size();
-        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
-        Pixels::new(WIDTH as u32, HEIGHT as u32, surface_texture).unwrap()
-    };
+    // Create a render texture to draw to for pixel-perfect scaling
+    let mut target = rl
+        .load_render_texture(&thread, WIDTH as u32, HEIGHT as u32)
+        .unwrap();
 
     let mut engine = Engine::init();
 
-    event_loop.run(move |event, _, control_flow| {
-        if let Event::RedrawRequested(_) = event {
-            if engine.time.elapsed() > Duration::from_millis(50) {
-                engine.move_player();
+    rl.set_target_fps(20);
 
-                engine.draw(pixels.frame_mut());
-                pixels.render().unwrap();
+    while !rl.window_should_close() {
+        engine.k.w = rl.is_key_down(KeyboardKey::KEY_W);
+        engine.k.a = rl.is_key_down(KeyboardKey::KEY_A);
+        engine.k.s = rl.is_key_down(KeyboardKey::KEY_S);
+        engine.k.d = rl.is_key_down(KeyboardKey::KEY_D);
 
-                engine.time = Instant::now();
-            }
+        engine.k.sl = rl.is_key_down(KeyboardKey::KEY_COMMA);
+        engine.k.sr = rl.is_key_down(KeyboardKey::KEY_PERIOD);
+        engine.k.m = rl.is_key_down(KeyboardKey::KEY_M);
+
+        engine.move_player();
+
+        let mut d = rl.begin_drawing(&thread);
+
+        // Do drawing here on the render texture instead of the screen
+        {
+            let mut texture = d.begin_texture_mode(&thread, &mut target);
+            engine.draw(&mut texture);
         }
 
-        if input.update(&event) {
-            if input.key_pressed(VirtualKeyCode::Escape) || input.close_requested() {
-                *control_flow = ControlFlow::Exit;
-                return;
-            }
-
-            engine.keys.w = input.key_held(VirtualKeyCode::W);
-            engine.keys.a = input.key_held(VirtualKeyCode::A);
-            engine.keys.s = input.key_held(VirtualKeyCode::S);
-            engine.keys.d = input.key_held(VirtualKeyCode::D);
-
-            engine.keys.sl = input.key_held(VirtualKeyCode::Period);
-            engine.keys.sr = input.key_held(VirtualKeyCode::Comma);
-            engine.keys.m = input.key_held(VirtualKeyCode::M);
-
-            window.request_redraw();
-        }
-    });
+        // Red color signifies that the render texture is being drawn incorrectly
+        d.clear_background(Color::RED);
+        // Draw the render texture to the screen
+        d.draw_texture_ex(
+            &target.texture(),
+            Vector2::zero(),
+            0.,
+            SCALE as f32,
+            Color::WHITE,
+        );
+        // d.draw_fps(5, 5);
+    }
 }
 
 impl Engine {
     fn init() -> Self {
-        let tick = 0;
-        let time = Instant::now();
-        let keys = Keys {
-            w: false,
-            a: false,
-            s: false,
-            d: false,
-            sl: false,
-            sr: false,
-            m: false,
-        };
-        let math = Math {
+        let k = Keys::default();
+        let m = Math {
             cos: (0..360)
                 .map(|x| (x as f32 / 180.0 * PI).cos())
                 .collect::<Vec<f32>>()
@@ -125,52 +115,49 @@ impl Engine {
                 .try_into()
                 .unwrap(),
         };
-        let player = Player {
+        let p = Player {
             x: 70,
             y: -110,
             z: 20,
             a: 0,
             l: 0,
         };
-        Self {
-            tick,
-            time,
-            keys,
-            math,
-            player,
-        }
+        Self { k, m, p }
     }
 
-    fn draw(&mut self, frame: &mut [u8]) {
-        let p = &mut self.player;
-        let m = &mut self.math;
+    fn draw(&mut self, draw: &mut RaylibTextureMode<RaylibDrawHandle>) {
+        let p = &mut self.p;
+        let m = &mut self.m;
 
-        clear_background(frame, 8);
-
-        let mut wx = [0; 4];
-        let mut wy = [0; 4];
-        let mut wz = [0; 4];
+        draw.clear_background(COLORS[8]);
 
         let cs = m.cos[p.a as usize];
         let sn = m.sin[p.a as usize];
 
+        // offset bottom 2 points by player
         let x1 = 40 - p.x;
         let y1 = 10 - p.y;
         let x2 = 40 - p.x;
         let y2 = 290 - p.y;
 
+        // world x position
+        let mut wx = [0; 4];
         wx[0] = (x1 as f32 * cs - y1 as f32 * sn) as i32;
         wx[1] = (x2 as f32 * cs - y2 as f32 * sn) as i32;
         wx[2] = wx[0];
         wx[3] = wx[1];
 
+        // world y position (depth)
+        let mut wy = [0; 4];
         wy[0] = (y1 as f32 * cs + x1 as f32 * sn) as i32;
         wy[1] = (y2 as f32 * cs + x2 as f32 * sn) as i32;
         wy[2] = wy[0];
         wy[3] = wy[1];
 
-        wz[0] = 0 - p.z + ((p.l * wy[0]) as f32 / 32.0) as i32;
-        wz[1] = 0 - p.z + ((p.l * wy[1]) as f32 / 32.0) as i32;
+        // world z height
+        let mut wz = [0; 4];
+        wz[0] = 0 - p.z + ((p.l * wy[0]) as f32 / 32.) as i32;
+        wz[1] = 0 - p.z + ((p.l * wy[1]) as f32 / 32.) as i32;
         wz[2] = wz[0] + 40;
         wz[3] = wz[1] + 40;
 
@@ -178,10 +165,29 @@ impl Engine {
             return;
         }
 
-        // if wy[0] < 1 {
-        //     clip_behind_player(&mut wx[0], &mut wy[0], &mut wz[0], wx[1], wy[1], wz[1]);
-        // }
+        if wy[0] < 1 {
+            let wx1 = wx[1];
+            let wy1 = wy[1];
+            let wz1 = wz[1];
+            clip_behind_player(&mut wx[0], &mut wy[0], &mut wz[0], wx1, wy1, wz1);
+            let wx3 = wx[3];
+            let wy3 = wy[3];
+            let wz3 = wz[3];
+            clip_behind_player(&mut wx[2], &mut wy[2], &mut wz[2], wx3, wy3, wz3);
+        }
 
+        if wy[1] < 1 {
+            let wx0 = wx[0];
+            let wy0 = wy[0];
+            let wz0 = wz[0];
+            clip_behind_player(&mut wx[1], &mut wy[1], &mut wz[1], wx0, wy0, wz0);
+            let wx2 = wx[2];
+            let wy2 = wy[2];
+            let wz2 = wz[2];
+            clip_behind_player(&mut wx[3], &mut wy[3], &mut wz[3], wx2, wy2, wz2);
+        }
+
+        // screen x, screen y position
         wx[0] = wx[0] * 200 / wy[0] + (WIDTH / 2);
         wy[0] = wz[0] * 200 / wy[0] + (HEIGHT / 2);
         wx[1] = wx[1] * 200 / wy[1] + (WIDTH / 2);
@@ -191,59 +197,61 @@ impl Engine {
         wx[3] = wx[3] * 200 / wy[3] + (WIDTH / 2);
         wy[3] = wz[3] * 200 / wy[3] + (HEIGHT / 2);
 
-        draw_wall(wx[0], wx[1], wy[0], wy[1], wy[2], wy[3], frame);
+        // draw points
+        draw_wall(wx[0], wx[1], wy[0], wy[1], wy[2], wy[3], draw);
     }
 
     fn move_player(&mut self) {
-        let p = &mut self.player;
-        let m = &mut self.math;
+        let p = &mut self.p;
+        let m = &mut self.m;
+        let k = &self.k;
 
-        let dx = m.sin[p.a as usize] * 10.0;
-        let dy = m.cos[p.a as usize] * 10.0;
+        let dx = (m.sin[p.a as usize] * 10.0) as i32;
+        let dy = (m.cos[p.a as usize] * 10.0) as i32;
 
-        if !self.keys.m {
-            if self.keys.a {
+        if !k.m {
+            if k.a {
                 p.a -= 4;
                 if p.a < 0 {
                     p.a += 360
                 }
             }
-            if self.keys.d {
+            if k.d {
                 p.a += 4;
                 if p.a > 359 {
                     p.a -= 360
                 }
             }
-            if self.keys.w {
-                p.x += dx as i32;
-                p.y += dy as i32
+            if k.w {
+                p.x += dx;
+                p.y += dy;
             }
-            if self.keys.s {
-                p.x -= dx as i32;
-                p.y -= dy as i32
+            if k.s {
+                p.x -= dx;
+                p.y -= dy;
             }
         } else {
-            if self.keys.a {
+            if k.a {
                 p.l -= 1
             }
-            if self.keys.d {
+            if k.d {
                 p.l += 1
             }
-            if self.keys.w {
+            if k.w {
                 p.z -= 4
             }
-            if self.keys.s {
+            if k.s {
                 p.z += 4
             }
         }
 
-        if self.keys.sr {
-            p.x += dy as i32;
-            p.y -= dx as i32
+        if k.sr {
+            p.x += dy;
+            p.y -= dx;
         }
-        if self.keys.sl {
-            p.x -= dy as i32;
-            p.y += dx as i32
+        if k.sl {
+            p.x -= dy;
+            p.y += dx;
         }
     }
 }
@@ -256,19 +264,25 @@ fn clip_behind_player(x1: &mut i32, y1: &mut i32, z1: &mut i32, x2: i32, y2: i32
         d = 1.0;
     }
     let s = da / (da - db);
+    println!("s: {}", s);
 
-    *x1 = *x1 + (s * (x2 as f32 - *x1 as f32)) as i32;
-    *y1 = *y1 + (s * (y2 as f32 - *y1 as f32)) as i32;
+    *x1 = *x1 + (s * (x2 - *x1) as f32) as i32;
+    *y1 = *y1 + (s * (y2 - *y1) as f32) as i32;
     if *y1 == 0 {
         *y1 = 1;
     }
-    *z1 = *z1 + (s * (z2 as f32 - *z1 as f32)) as i32;
+    *z1 = *z1 + (s * (z2 - *z1) as f32) as i32;
 }
 
-fn draw_wall(x1: i32, x2: i32, b1: i32, b2: i32, t1: i32, t2: i32, frame: &mut [u8]) {
-    let mut x1 = x1;
-    let mut x2 = x2;
-
+fn draw_wall(
+    mut x1: i32,
+    mut x2: i32,
+    b1: i32,
+    b2: i32,
+    t1: i32,
+    t2: i32,
+    draw: &mut RaylibTextureMode<RaylibDrawHandle>,
+) {
     let dyb = b2 - b1;
     let dyt = t2 - t1;
     let mut dx = x2 - x1;
@@ -276,7 +290,6 @@ fn draw_wall(x1: i32, x2: i32, b1: i32, b2: i32, t1: i32, t2: i32, frame: &mut [
         dx = 1
     }
     let xs = x1;
-
     if x1 < 1 {
         x1 = 1;
     }
@@ -308,43 +321,7 @@ fn draw_wall(x1: i32, x2: i32, b1: i32, b2: i32, t1: i32, t2: i32, frame: &mut [
         }
 
         for y in y1..y2 {
-            pixel(x, y, frame, 0);
-        }
-    }
-}
-
-fn get_pixel_index(x: i32, y: i32) -> usize {
-    (((y * WIDTH) + x) * 4) as usize
-}
-
-fn pixel(x: i32, y: i32, frame: &mut [u8], c: usize) {
-    if (x < 0) || (y < 0) || (x >= WIDTH) || (y >= HEIGHT) {
-        return;
-    }
-
-    let y = HEIGHT as i32 - y - 1;
-
-    let rgba = match c {
-        0 => [255, 255, 0, 255],
-        1 => [160, 160, 0, 255],
-        2 => [0, 255, 0, 255],
-        3 => [0, 160, 0, 255],
-        4 => [0, 255, 255, 255],
-        5 => [0, 160, 160, 255],
-        6 => [160, 100, 0, 255],
-        7 => [110, 50, 0, 255],
-        _ => [0, 60, 130, 255],
-    };
-
-    let i = get_pixel_index(x, y);
-    let pixel = &mut frame[i..i + 4];
-    pixel.copy_from_slice(&rgba);
-}
-
-fn clear_background(frame: &mut [u8], c: usize) {
-    for x in 0..WIDTH {
-        for y in 0..HEIGHT {
-            pixel(x, y, frame, c);
+            draw.draw_pixel(x, y, COLORS[0]);
         }
     }
 }
