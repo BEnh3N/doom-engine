@@ -18,11 +18,18 @@ fn main() {
 
     // init function
     let mut engine = Engine::new();
-    engine.read_world_from_file("world.txt");
+    engine.load_default_level();
+    for t in 0..20 {
+        let path = format!("assets/textures/T_{:0>2}.tex", t);
+        engine.load_texture_from_file(path);
+    }
 
     while !rl.window_should_close() {
         // move player
         engine.p.handle_inputs(&rl);
+        if rl.is_key_pressed(KeyboardKey::KEY_ENTER) {
+            engine.load_default_level();
+        }
 
         // draw everything to lower resolution texture
         let mut dh = rl.begin_drawing(&thread);

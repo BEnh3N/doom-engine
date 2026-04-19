@@ -1,6 +1,6 @@
 use raylib::prelude::*;
 
-use crate::{cos, sin};
+use crate::{cos, sin, vector::Vec3};
 
 const LEFT: KeyboardKey = KeyboardKey::KEY_A;
 const RIGHT: KeyboardKey = KeyboardKey::KEY_D;
@@ -10,10 +10,9 @@ const STRAFE_LEFT: KeyboardKey = KeyboardKey::KEY_COMMA;
 const STRAFE_RIGHT: KeyboardKey = KeyboardKey::KEY_PERIOD;
 const MODIFIER: KeyboardKey = KeyboardKey::KEY_M;
 
+#[derive(Default)]
 pub struct Player {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
+    pub pos: Vec3,
     pub a: i32,
     pub l: i32,
 }
@@ -38,12 +37,12 @@ impl Player {
                 }
             }
             if rl.is_key_down(UP) {
-                self.x += dx;
-                self.y += dy;
+                self.pos.x += dx;
+                self.pos.y += dy;
             }
             if rl.is_key_down(DOWN) {
-                self.x -= dx;
-                self.y -= dy;
+                self.pos.x -= dx;
+                self.pos.y -= dy;
             }
         } else {
             if rl.is_key_down(LEFT) {
@@ -53,32 +52,20 @@ impl Player {
                 self.l += 1;
             }
             if rl.is_key_down(UP) {
-                self.z += 4;
+                self.pos.z += 4;
             }
             if rl.is_key_down(DOWN) {
-                self.z -= 4;
+                self.pos.z -= 4;
             }
         }
 
         if rl.is_key_down(STRAFE_LEFT) {
-            self.x -= dy;
-            self.y += dx;
+            self.pos.x -= dy;
+            self.pos.y += dx;
         }
         if rl.is_key_down(STRAFE_RIGHT) {
-            self.x += dy;
-            self.y -= dx;
-        }
-    }
-}
-
-impl Default for Player {
-    fn default() -> Self {
-        Self {
-            x: 70,
-            y: -110,
-            z: 20,
-            a: 0,
-            l: 0,
+            self.pos.x += dy;
+            self.pos.y -= dx;
         }
     }
 }
